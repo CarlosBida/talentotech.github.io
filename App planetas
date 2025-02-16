@@ -1,0 +1,291 @@
+import 'package:flutter/material.dart';
+import 'package:sqflite/sqflite.dart';
+import 'package:path/path.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Gerenciador de Planetas',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
+      ),
+      home: const PlanetListPage(),
+    );
+  }
+}
+
+class Planet {
+  final int? id;
+  final String name;
+  final double distanceFromSun;
+  final double size;
+  final String? nickname;
+
+  Planet({this.id, required this.name, required this.distanceFromSun, required this.size, this.nickname});
+
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'name': name,
+      'distanceFromSun': distanceFromSun,
+      'size': size,
+      'nickname': nickname,
+    };
+  }
+
+  static Planet fromMap(Map<String, dynamic> map) {
+    return Planet(
+      id: map['id'],
+      name: map['name'],
+      distanceFromSun: map['distanceFromSun'],
+      size: map['size'],
+      nickname: map['nickname'],
+    );
+  }
+}
+
+class DatabaseHelper {
+  static final DatabaseHelper _instance = DatabaseHelper._internal();
+  factory DatabaseHelper() => _instance;
+
+  static Database? _database;
+
+  DatabaseHelper._internal();
+
+  Future<Database> get database async {
+    if (_database != null) return _database!;
+    _database = await _initDB();
+    return _database!;
+  }
+
+  Future<Database> _initDB() async {
+    String path = join(await getDatabasesPath(), 'planets.db');
+    return await openDatabase(
+      path,
+      version: 1,
+      onCreate: (db, version) async {
+        await db.execute('''
+          CREATE TABLE planets(
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT,
+            distanceFromSun REAL,
+            size REAL,
+            nickname TEXT
+          )
+        ''');
+      },
+    );
+  }
+
+  Future<void> insertPlanet(Planet planet) async {
+    final db = await database;
+    await db.insert('planets', planet.toMap());
+  }
+
+  Future<List<Planet>> getPlanets() async {
+    final db = await database;
+    final List<Map<String, dynamic>> maps = await db.query('planets');
+    return List.generate(maps.length, (i) {
+      return Planet.fromMap(maps[i]);
+    });
+  }
+
+  Future<void> updatePlanet(Planet planet) async {
+    final db = await database;
+    await db.update('planets', planet.toMap(), where: 'id = ?', whereArgs: [planet.id]);
+  }
+
+  Future<void> deletePlanet(int id) async {
+    final db = await database;
+    await db.delete('planets', where: 'id = ?', whereArgs: [id]);
+  }
+}
+
+class PlanetListPage extends StatefulWidget {
+  const PlanetListPage({super.key});
+
+  @override
+  State<PlanetListPage> createState() => _PlanetListPageState();
+}
+
+class _PlanetListPageState extends State<PlanetListPage> {
+  final DatabaseHelper _dbHelper = DatabaseHelper();
+  List<Planet> _planets = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshPlanets();
+  }
+
+  void _refreshPlanets() async {
+    final planets = await _dbHelper.getPlanets();
+    setState(() {
+      _planets = planets;
+    });
+  }
+
+  void _addPlanet() async {
+    var showDialog2 = newMethod();
+    final planet = await showDialog2;
+    if (planet != null) {
+      await _dbHelper.insertPlanet(planet);
+      _refreshPlanets();
+    }
+  }
+
+  Future<Planet?> newMethod() {
+    return showDialog<Planet>(
+    context: context,
+    builder: (context) => PlanetDialog(),
+  );
+  }
+
+  void _editPlanet(Planet planet) async {
+    final updatedPlanet = await showDialog<Planet>(
+      context: context,
+      builder: (context) => PlanetDialog(planet: planet),
+    );
+    if (updatedPlanet != null) {
+      await _dbHelper.updatePlanet(updatedPlanet);
+      _refreshPlanets();
+    }
+  }
+
+  void _deletePlanet(int id) async {
+    await _dbHelper.deletePlanet(id);
+    _refreshPlanets();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Gerenciador de Planetas'),
+      ),
+      body: Column(
+        mainAxisAlignment: MainAxisAlignment.end,
+        children: <Widget>[
+          Expanded(
+            child: ListView.builder(
+              itemCount: _planets.length,
+              itemBuilder: (context, index) {
+                final planet = _planets[index];
+                return ListTile(
+                  title: Text(planet.name),
+                  subtitle: Text('Apelido: ${planet.nickname ?? 'N/A'}'),
+                  onTap: () => _editPlanet(planet),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete),
+                    onPressed: () => _deletePlanet(planet.id!),
+                  ),
+                );
+              },
+            ),
+          ),
+          ElevatedButton(
+            onPressed: _addPlanet,
+            child: const Text('Adicionar Planeta'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class PlanetDialog extends StatefulWidget {
+  final Planet? planet;
+
+  PlanetDialog({this.planet});
+
+  @override
+  _PlanetDialogState createState() => _PlanetDialogState();
+}
+
+class _PlanetDialogState extends State<PlanetDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late String _name;
+  late double _distanceFromSun;
+  late double _size;
+  String? _nickname;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.planet != null) {
+      _name = widget.planet!.name;
+      _distanceFromSun = widget.planet!.distanceFromSun;
+      _size = widget.planet!.size;
+      _nickname = widget.planet!.nickname;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: Text(widget.planet == null ? 'Adicionar Planeta' : 'Editar Planeta'),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              initialValue: _name,
+              decoration: const InputDecoration(labelText: 'Nome do Planeta'),
+              validator: (value) => value!.isEmpty ? 'Insira um nome' : null,
+              onChanged: (value) => _name = value,
+            ),
+            TextFormField(
+              initialValue: _distanceFromSun.toString(),
+              decoration: const InputDecoration(labelText: 'Distância do Sol (AU)'),
+              keyboardType: TextInputType.number,
+              validator: (value) => double.tryParse(value!) == null || double.parse(value) <= 0 ? 'Insira um número positivo' : null,
+              onChanged: (value) => _distanceFromSun = double.parse(value),
+            ),
+            TextFormField(
+              initialValue: _size.toString(),
+              decoration: const InputDecoration(labelText: 'Tamanho (km)'),
+              keyboardType: TextInputType.number,
+              validator: (value) => double.tryParse(value!) == null || double.parse(value) <= 0 ? 'Insira um número positivo' : null,
+              onChanged: (value) => _size = double.parse(value),
+            ),
+            TextFormField(
+              initialValue: _nickname,
+              decoration: const InputDecoration(labelText: 'Apelido (opcional)'),
+              onChanged: (value) => _nickname = value.isEmpty ? null : value,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          child: const Text('Cancelar'),
+          onPressed: () => Navigator.of(context).pop(),
+        ),
+        TextButton(
+          child: const Text('Salvar'),
+          onPressed: () {
+            if (_formKey.currentState!.validate()) {
+              final planet = Planet(
+                id: widget.planet?.id,
+                name: _name,
+                distanceFromSun: _distanceFromSun,
+                size: _size,
+                nickname: _nickname,
+              );
+              Navigator.of(context).pop(planet);
+            }
+          },
+        ),
+      ],
+    );
+  }
+}
